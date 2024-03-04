@@ -1,0 +1,336 @@
+---
+title: "Part 2: Model fitting, Model Evaluation, Model Deployment"
+author: "Juweria Ali"
+date: '2022-03-25'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Clearing the workspace and setting the working directory.
+
+```{r warning = F}
+rm(list=ls())
+```
+#### Set working directory
+
+```{r}
+setwd("C:/Users/juwer/Desktop/MSc/Projects")
+```
+#### Loading required libraries
+```{r}
+library(caret)
+library(ggplot2)
+library(mlbench)
+library(MASS)
+library(leaps)
+library(corrplot)
+```
+#### Loading the dataset
+```{r}
+escapesClean = read.csv("escapesClean.csv", stringsAsFactors = T, header = T)
+```
+#### Explore the data
+```{r}
+summary(escapesClean)
+```
+
+#### Next analyse the correlation between of variables 
+
+#### In this case our target is a category, so correlations won't work without some pre-processing
+
+Creating a copy of the dataset to calculate correlations on it
+```{r}
+CorEscapes = escapesClean
+```
+
+#### Create a numerical equivalent as {0,1}
+```{r}
+CorEscapes$Cause01 = as.numeric(escapesClean$Cause)-1
+```
+
+#### Calculate the correlation between variables 
+
+#### Removing the categorical variables for correlation to work
+
+#### Feature selection
+```{r}
+round(cor(CorEscapes[-c(1,2,6,7)], method = "spearman"), 2)
+```
+#### Visualise the correlation between variables
+```{r}
+corrplot(cor(CorEscapes[-c(1,2,6,7)], method = "spearman"))
+```
+
+#### Validation method
+```{r}
+control = trainControl(method = "cv", number = 10)
+```
+
+#### Pre-processing
+```{r}
+prep2 = c('range')
+```
+
+
+### MODEL 1: LOGISTIC REGRESSION
+
+Design and implement a Logistic Regression model to predict Cause
+
+#### Fitting a model
+
+```{r}
+set.seed(123)
+model1 = train(Cause ~ .,                
+               data = escapesClean,method = "glm", family = "binomial", 
+               trControl = control, 
+               
+               )
+model1
+```
+#### Analyse and visualise the results
+```{r}
+summary(model1)
+```
+#### Predict using the model
+```{r}
+probs1 = predict(model1, escapesClean, type = "prob")
+predicted1 = predict(model1, escapesClean)
+escapesClean$predicted = predicted1
+escapesClean$correct = (escapesClean$Cause==escapesClean$predicted)
+```
+
+#### Evaluate results
+```{r}
+confusionMatrix(predicted1, escapesClean$Cause)
+```
+### MODEL 2: CLASSIFICATION MODEL OF YOUR CHOICE - Random Forest
+
+Design and implement another classification model that has been covered in the CMM535 module
+to predict Cause.
+
+
+#### Fitting the model
+```{r}
+set.seed(123)
+model2 = train(Cause ~ .,method = "rf",
+               data = escapesClean,
+               trControl = control,
+               tuneGrid = expand.grid(mtry=c(1,2,3,4)),
+               
+              )
+model2
+```
+#### Predict using the model
+```{r}
+probs2 = predict(model2, escapesClean, type = "prob")
+predicted2 = predict(model2, escapesClean)
+escapesClean$predicted = predicted2
+escapesClean$correct = (escapesClean$Cause==escapesClean$predicted)
+```
+
+#### Evaluate the results of the predictions
+```{r}
+confusionMatrix(predicted2, escapesClean$Cause)
+```
+#### Comparing model1 & model2
+```{r}
+results = resamples(list(LR = model1, RF = model2))
+summary(results)
+```
+
+```{r}
+dotplot(results, conf.level = 0.95, scales = "free")
+```
+
+### Critically compare and contrast the effectiveness of model 1 and model 2 [Word limit of 150      words].
+
+* Below is the confusion matrix for model1. We can see that 22 instances of class Human and 44 instances of class Natural were classified incorrectly.
+         
+          Reference
+Prediction Human Natural
+   Human     116      44
+   Natural    22      39
+
+The accuracy for this model is 0.6923 and Human was returned as the positive class with fewer misclassifications in comparison to class Natural.
+
+* Below is the confusion matrix for model2. We can see that all the instances were correctly classified.
+
+            Reference
+Prediction Human Natural
+   Human     138       0
+   Natural     0      83
+
+The accuracy for this model is 1.
+
+Accuracy has been used as a measure to evaluate the performance of the models.From the confusion matrices we can clearly say that model2 has outperformed model1 by giving 100% accuracy. Using the dot plot for comparison, we can see the intervals and the margin of error do not overlap, hence, the difference in performance is said to be statistically significant.
+
+
+### MODEL 3: LINEAR REGRESSION
+
+Select data features that will be suitable and relevant for predicting Number
+Design and implement a Linear Regression model to predict Number
+
+#### Removing unnecessary columns
+```{r}
+escapesClean<-subset(escapesClean,select=-c(predicted,correct))
+```
+
+#### Feature selection
+
+```{r warning=FALSE}
+fullSearch = regsubsets(Number ~ .,data = escapesClean, 
+                        method = "exhaustive", nvmax = 13)
+full = summary(fullSearch)
+
+plot(full$rss, type = "b", col = "red", 
+     ylab = "RSS", xlab = "Number of variables")
+
+plot(full$adjr2, type = "b", col = "red", 
+     ylab = "adjusted R2", xlab = "Number of variables")
+
+full$outmat
+```
+#### Three variables appear to be the best option.
+```{r}
+q = full$which[3,-c(1)]  
+vars = paste(names(q[q == TRUE]), collapse = "+")  
+form = as.formula(paste("Number ~ ", vars))  
+form
+```
+We can observe that the best three variable model is charges Season + Cause + SLR either from the matrix or the extracted formula.
+
+
+#### Creating train and test data
+
+To ensure that we are not overfitting, we have a train-test split.
+
+```{r}
+set.seed(123)
+selected = createDataPartition(escapesClean$Number, p = 0.7, list = F)
+trainData = escapesClean[selected, ]
+testData = escapesClean[-selected, ]
+dim(trainData)
+```
+
+#### Fitting the model
+```{r}
+set.seed(123)
+model3 = train(Number ~ Season + Cause + SLR, data = trainData, method = "lm",
+trControl = control, preProcess = prep2)
+```
+
+```{r}
+varImp(model3)
+```
+#### Predict the model
+```{r}
+pred3 = predict(model3, testData)
+```
+
+#### Summary of the key metrics of regression
+```{r}
+postResample(pred3, testData$Number)
+```
+
+### MODEL 4: REGRESSION MODEL OF YOUR CHOICE - Random Forest
+
+Design and implement a second Regression model, using the same set of data features as for Model
+3, using techniques that have been covered in CMM535 module, to predict Number.
+
+#### Fitting the model
+```{r}
+set.seed(123)
+model4 <- train(Number ~ Season + Cause + SLR,
+    data = trainData,
+    method = "rf",
+    metric = "RMSE",
+    ntree= 500,
+    maxnodes = 5,
+    trControl = control,
+    preProcess = prep2,
+    tuneGrid = expand.grid(mtry=c(1,2,3,4))
+   )
+ 
+print(model4)
+```
+```{r}
+varImp(model4)
+```
+#### Predicting the model
+```{r}
+pred4 = predict(model4, testData)
+```
+
+#### Summary of the key metrics of regression
+```{r}
+postResample(pred4, testData$Number)
+
+```
+#### Comparing model 3 & 4
+```{r}
+results = resamples(list(LM = model3, RF = model4))
+summary(results)
+```
+```{r}
+dotplot(results, conf.level = 0.95, scales = "free")
+```
+
+#### Critically compare and contrast the effectiveness of model 3 and model 4 [Word limit of 150      words].
+We can see for model3 the values are as below
+
+        RMSE     Rsquared          MAE 
+2.828209e+04 5.819523e-01 1.672154e+04 
+
+And for model4 the values are as below
+
+        RMSE     Rsquared          MAE 
+2.759882e+04 7.580624e-01 1.272780e+04 
+
+RMSE is being used as a metric to compare the performance of the models. Lower the RMSE value the better the model. Hence, we can say that in this case model4 performs better as it has the lowest RMSE value among the two models.From the dot plots for comparison we see that the intervals and the margin of error are quite overlapping, hence, we may say that the difference in performance is not statistically significant.
+
+
+### MODEL DEPLOYMENT: A BASIC SHINY APP
+
+model2 has given a better accuracy, hence considering it to refit for the Shiny R app
+
+#### Variable importance to select the 6 best predictors
+```{r}
+varImp(model2)
+```
+#### Refitting the model by selecting the six best variables i.e.Number, N,Cu,Org,P,Age according      to their importance
+
+```{r}
+set.seed(123)
+model2refit = train(Cause ~ Number + Cu + Age + N + Org + P,
+                    data = escapesClean,method = "rf", 
+                    trControl = control, 
+                    preProcess = prep2
+                )
+model2refit
+```
+#### Save the refitted model
+```{r}
+saveRDS(model2refit, "C:\\Users\\juwer\\Desktop\\MSc\\Semester 2\\Data Science Development - CMM535\\Courseworks\\Part2\\CW2\\model.rds")
+```
+
+#### Ethical and Social Issues
+
+
+The use of machine learning algorithms for predictions raises several ethical and/or societal concerns, including, but not limited to, incomplete evidence leading to poor judgment, a lack of transparency, erroneous evidence leading to unintended bias, and unjust findings causing discrimination (Tilimbe 2019). As a result, the predictions generated using the above-mentioned model are not immune to criticism. Given specific input variables, the application, for example, will return 'Human' mistake as the reason of fish escape , resulting in unjust or discriminating treatment of farm workers, or vice-versa when the reason returned by the algorithm is 'Natural' and the fish farms trying to find a solution to the 'Natural' escapes when in reality the reason is human error. As a result, caution should be exercised when using the model's conclusions because algorithms are not always inherently ethical.
+
+### References
+
+* Lonnie, D., 2022. Linear Regression Models. [lab]. Data Science Development. Robert Gordon University. School of Computing Science and Digital Media, 28th Feb. Available from: https://campusmoodle.rgu.ac.uk/pluginfile.php/5772404/mod_resource/content/8/CMM535%20Lab%2006%20-%20Linear%20Regression%20Models.pdf [Accessed 26/04/2022].
+
+* Lonnie, D., 2022. Logistic Regression and LDA Models. [lab]. Data Science Development. Robert Gordon University. School of Computing Science and Digital Media, 7th March. Available from: https://campusmoodle.rgu.ac.uk/pluginfile.php/5772406/mod_resource/content/11/CMM535%20Lab%2007%20-%20Logistic%20Regression%20and%20 [Accessed 26/04/2022].
+
+* Lonnie, D., 2022. Revisions of Models and Model Comparison. [lab]. Data Science Development. Robert Gordon University. School of Computing Science and Digital Media, 28th March. Available from: https://campusmoodle.rgu.ac.uk/pluginfile.php/5833704/mod_resource/content/6/lab10solutions.html [Accessed 26/04/2022].
+
+* Lonnie, D., 2022. Deploying models using R Shiny. [lab]. Data Science Development. Robert Gordon University. School of Computing Science and Digital Media, 21st March. Available from: https://rgu.cloud.panopto.eu/Panopto/Pages/Viewer.aspx?id=d6a154b4-a370-4033-81a5-ae6601164ea0 [Accessed 29/04/2022].
+
+* Tilimbe, Jiya. (2019). Ethical Implications of Predictive Risk Intelligence. ORBIT Journal, 2(2). https://doi.org/10.29297/orbit.v2i2.112
+
+
